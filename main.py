@@ -61,6 +61,9 @@ class CalendarApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         root.title("课表转 Apple Calendar")
+        icon_path = Path(__file__).resolve().parent / "assets" / "course_calendar_icon.png"
+        self.icon_image = tk.PhotoImage(file=str(icon_path))
+        root.iconphoto(True, self.icon_image)
         root.geometry("1120x760")
         root.minsize(900, 620)
         self.data = {"first_monday": previous_monday().isoformat(), "timezone": "Asia/Shanghai",
