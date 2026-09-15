@@ -9,6 +9,4 @@ test.json
 test.ics
 3rd_grade_upperhalf.json
 3rd_grade_upperhalf.ics
-/release/build/
-/release/build-slim/
-/release/*.exe
+/release/
