@@ -14,7 +14,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from course_data import DAY_NAMES, include_code_choice, normalize_course, parse_weeks
+from course_data import DAY_NAMES, parse_weeks
 from ics_export import export_ics
 from timetable_ocr import recognize
 
@@ -38,7 +38,6 @@ def previous_monday(today: dt.date | None = None) -> dt.date:
 
 def course_review_issue(course: dict) -> str | None:
     """Return the field that still blocks a reviewed course from export."""
-    normalize_course(course)
     if not str(course.get("title", "")).strip():
         return "缺少课程名"
     try:
@@ -216,7 +215,7 @@ class CalendarApp:
             self.set_status("识别失败；可换清晰截图或打开 JSON 手动编辑。")
         else:
             self.data = value
-            self.include_code.set(include_code_choice(value))
+            self.include_code.set(value["include_course_code"])
             self.current_index = None
             self.refresh_table()
             layout = value.get("recognition", {}).get("layout", "")
@@ -229,7 +228,6 @@ class CalendarApp:
         for item in self.table.get_children():
             self.table.delete(item)
         for index, course in enumerate(self.data["courses"]):
-            normalize_course(course)
             day = int(course.get("day", 0))
             self.table.insert("", "end", iid=str(index), values=("周" + DAY_NAMES[day],
                 f"{course.get('start', '')}-{course.get('end', '')}", course.get("teacher", ""),
@@ -360,8 +358,12 @@ class CalendarApp:
             data = json.loads(Path(selected).read_text(encoding="utf-8"))
             if not isinstance(data.get("courses"), list):
                 raise ValueError("JSON 中缺少 courses 列表")
+            if not isinstance(data.get("include_course_code"), bool):
+                raise ValueError("JSON 中缺少布尔字段 include_course_code")
+            if any(not isinstance(course, dict) or "course_code" not in course for course in data["courses"]):
+                raise ValueError("JSON 的每门课程都必须包含 course_code 字段")
             self.data = data
-            self.include_code.set(include_code_choice(data))
+            self.include_code.set(data["include_course_code"])
             self.monday.set(data["first_monday"])
             self.current_index = None
             self.refresh_table()

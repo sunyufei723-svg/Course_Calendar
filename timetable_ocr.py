@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
+from statistics import median
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from course_data import DAY_NAMES, extract_location, parse_weeks, split_teacher_title
+from course_data import DAY_NAMES, extract_location, parse_weeks, split_course_code, split_teacher_title
 
 TIME_RE = re.compile(r"(\d{1,2}:\d{2})\s*[-~—–]\s*(\d{1,2}:\d{2})")
 WEEK_RE = re.compile(r"(?:第)?\s*(\d{1,2})(?:\s*[-~—–]\s*(\d{1,2}))?\s*周")
@@ -17,6 +18,48 @@ DAY_RE = re.compile(r"(?:星期|周|礼拜)\s*([一二三四五六日天])")
 
 def _has_weeks(value: str) -> bool:
     return bool(WEEK_RE.search(value) or re.search(r"[（(]\s*\d{1,2}\s*[-~]", value))
+
+
+def _title_with_visual_space(line: dict) -> str:
+    """Restore one strong visual gap using ratios to glyph width, not pixels."""
+    text = line["text"]
+    if any(char.isspace() for char in text):
+        return text
+    boxes = line.get("word_boxes", [])
+    chars = line.get("word_content", [])
+    if boxes is None or chars is None:
+        return text
+    if len(boxes) != len(chars) or "".join(chars) != text or not all(len(char) == 1 for char in chars):
+        return text
+    title, _ = split_course_code(text)
+    if len(title) < 4:
+        return text
+    widths = [max(point[0] for point in box) - min(point[0] for point in box)
+              for box in boxes[:len(title)]]
+    chinese_widths = [width for char, width in zip(chars, widths)
+                      if "\u4e00" <= char <= "\u9fff" and width > 0]
+    usable_widths = [width for width in widths if width > 0]
+    if not usable_widths:
+        return text
+    reference = median(chinese_widths or usable_widths)
+    gaps = [max(0, min(point[0] for point in boxes[i + 1]) -
+                max(point[0] for point in boxes[i])) for i in range(len(title) - 1)]
+    positive = [gap for gap in gaps if gap > 0]
+    if len(positive) < 2:
+        return text
+    baseline = median(positive)
+    ranked = sorted(enumerate(gaps), key=lambda item: item[1], reverse=True)
+    index, gap = ranked[0]
+    runner_up = ranked[1][1]
+    prefix = title[:index + 1]
+    # Chinese names occupy a few glyphs; longer all-uppercase OCR names can
+    # also precede a Chinese title. Neither check guesses a course-name prefix.
+    plausible_prefix = (2 <= len(prefix) <= 4 and all("\u4e00" <= c <= "\u9fff" for c in prefix) or
+                        2 <= len(prefix) <= 15 and prefix.isascii() and prefix.isupper() and prefix.isalpha())
+    if (plausible_prefix and gap / reference >= 0.5 and
+            gap >= baseline * 1.5 and gap >= runner_up * 1.1):
+        return title[:index + 1] + " " + text[index + 1:]
+    return text
 
 
 def _axis_step(lines: list[dict], axis: str) -> float:
@@ -149,14 +192,17 @@ def recognize(image_path: Path, first_monday: str) -> dict:
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     except cv2.error as exc:
         raise ValueError("图片解码失败或图像处理资源不足；请稍后重试。") from exc
-    result, _ = RapidOCR(intra_op_num_threads=2, inter_op_num_threads=1)(rgb)
+    result, _ = RapidOCR(intra_op_num_threads=2, inter_op_num_threads=1)(rgb, return_word_box=True)
     lines = []
-    for box, value, confidence in result or []:
+    for row in result or []:
+        box, value, confidence = row[:3]
         points = np.asarray(box)
         lines.append({"x": float(points[:, 0].mean()), "y": float(points[:, 1].mean()),
                       "box": [int(points[:, 0].min()), int(points[:, 1].min()),
                               int(np.ptp(points[:, 0])), int(np.ptp(points[:, 1]))],
-                      "text": value.strip(), "confidence": round(float(confidence), 3)})
+                      "text": value.strip(), "confidence": round(float(confidence), 3),
+                      "word_boxes": row[3] if len(row) > 3 else [],
+                      "word_content": row[4] if len(row) > 4 else []})
     times = [line for line in lines if TIME_RE.search(line["text"])]
     days = [line for line in lines if DAY_RE.search(line["text"])]
     orientation = _layout(times, days)
@@ -194,17 +240,20 @@ def recognize(image_path: Path, first_monday: str) -> dict:
             texts = [line["text"] for line in block_lines]
             if not texts:
                 continue
-            titles = [text for text in texts if not _has_weeks(text)]
+            title_lines = [line for line in block_lines if not _has_weeks(line["text"])]
+            titles = [line["text"] for line in title_lines]
             if not titles or sum(bool(re.search(r"[（(]\d{3,6}[)）]", text)) for text in titles) > 1:
                 continue
             week_text = " ".join(text for text in texts if _has_weeks(text))
-            teacher, title, course_code = split_teacher_title(titles[0])
+            teacher, title, course_code = split_teacher_title(_title_with_visual_space(title_lines[0]))
+            details = list(texts)
+            details.remove(titles[0])
             first, last = min(covered), max(covered)
             start = TIME_RE.search(times[first]["text"]).group(1)
             end = TIME_RE.search(times[last]["text"]).group(2)
             courses.append({"teacher": teacher, "title": title, "course_code": course_code,
                             "day": day, "start": start, "end": end,
-                            "weeks": parse_weeks(week_text), "location": extract_location(week_text),
+                            "weeks": parse_weeks(week_text), "location": extract_location(details),
                             "raw_text": texts, "source_box": [x, y, w, h], "needs_review": True,
                             "_slot_first": first, "_slot_last": last})
         return courses
@@ -243,7 +292,7 @@ def recognize(image_path: Path, first_monday: str) -> dict:
             day = DAY_NAMES.index(day_symbol)
             if (day, slot) in occupied:
                 continue
-            teacher, title, code = split_teacher_title(line["text"])
+            teacher, title, code = split_teacher_title(_title_with_visual_space(line))
             if not title:
                 continue
             period = TIME_RE.search(times[slot]["text"])

@@ -9,8 +9,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from icalendar import Timezone
 
-from course_data import include_code_choice, normalize_course
-
 
 def escape_ics(value: str) -> str:
     return str(value).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
@@ -32,7 +30,9 @@ def export_ics(data: dict, output: Path, include_course_code: bool | None = None
     monday = dt.date.fromisoformat(data["first_monday"])
     if monday.weekday() != 0:
         raise ValueError("first_monday 必须是星期一")
-    include_code = include_code_choice(data) if include_course_code is None else include_course_code
+    if not isinstance(data.get("include_course_code"), bool):
+        raise ValueError("JSON 中缺少布尔字段 include_course_code")
+    include_code = data["include_course_code"] if include_course_code is None else include_course_code
     tz = data.get("timezone", "Asia/Shanghai")
     try:
         zone = ZoneInfo(tz)
@@ -48,9 +48,8 @@ def export_ics(data: dict, output: Path, include_course_code: bool | None = None
     lines.extend(timezone_definition.to_ical().decode("utf-8").splitlines())
     schedules: dict[tuple, set[int]] = {}
     for course in data["courses"]:
-        normalize_course(course)
         title = str(course["title"]).strip()
-        code = course["course_code"]
+        code = str(course["course_code"]).strip()
         if code and not code.isdigit():
             raise ValueError(f"课程序号必须是阿拉伯数字：{code}")
         day = int(course["day"])

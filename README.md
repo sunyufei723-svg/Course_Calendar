@@ -21,11 +21,13 @@ python main.py scan my_timetable.png --first-monday 2026-08-31 --output courses.
 
 打开 JSON 核对每门课的 `teacher`、`title`、`course_code`、`location`、`weeks`、`day`（0=周一，6=周日）、`start` 和 `end`。OCR 原文在 `raw_text` 中；`recognition` 记录识别的布局、背景颜色及候选色块数，`source_box` 记录课程块像素位置。尤其检查隔周课程和换行教室名；确认一门课程后将它的 `needs_review` 改为 `false`。若同一课程不同周在不同地点上课，拆成两条课程，给各条不同的 `weeks` 和 `location`。日历事件标题由 `title` 加可选的 `course_code` 构成，教师写在事件备注里。
 
+教师名优先按 OCR 文本中的空格拆分。没有空格时，识别器会比较相邻单字框的间距与同一行的字宽、通常字间距；只有课程标题前部出现明显更大的相对留白，才补出空格并拆出教师名。视觉证据不明确时，整段文字仍作为课程名，教师字段留空；小图中的字框取整可能使原有留白难以辨认。课程序号仍从末尾括号中单独提取，教师名可在 GUI 中手动修正。
+
 ```powershell
 python main.py export courses.json --output courses.ics
 ```
 
-命令行可加 `--with-code` 或 `--without-code` 覆盖 JSON 中的 `include_course_code` 选择。旧 JSON 若没有这个选项，会沿用原有标题样式；若课程序号只留在 `raw_text` 中，程序会自动提取到独立字段。
+命令行可加 `--with-code` 或 `--without-code` 覆盖 JSON 中的 `include_course_code` 选择。JSON 必须包含布尔字段 `include_course_code`，每门课程必须有独立的 `course_code` 字段；程序不再迁移旧格式。地点识别优先查找课程说明中的“教”或“楼”，即使地点不在周次后面或被 OCR 折行；田径场等地点会在有明确分隔符时提取。
 
 在 Mac 上双击 `.ics`，或在 Apple Calendar 中使用“文件 → 导入”。多周课程以每周重复的单条日程导出，重复截止时间按最后一个教学周计算；缺课周使用 `EXDATE` 排除，单周课程则不设置重复。使用 `Asia/Shanghai` 时区。再次导入同一份文件前，建议先检查目标日历，避免日历应用把重复导入显示成重复事件。
 
