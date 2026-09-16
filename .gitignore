@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 venv/
 /example*
+!/example.png
 courses.json
 courses.ics
 test.json

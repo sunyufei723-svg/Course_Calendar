@@ -14,7 +14,7 @@ GUI 中选择截图并填写第一周周一，点击“识别截图”。逐门�
 也可以继续使用命令行：
 
 ```powershell
-python main.py scan my_timetable.png --first-monday 2026-08-31 --output courses.json
+python main.py scan example.png --first-monday 2026-08-31 --output courses.json
 ```
 
 新建课表时，GUI 会自动填入今天之前最近的周一；命令行省略 `--first-monday` 时也使用这个默认值。若真实学期第一教学周更早，请改成学期起点，例如上面的 `2026-08-31`。已有 JSON 的日期仍从文件读取。
